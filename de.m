@@ -13,7 +13,7 @@ close all
 
 % PDSTEP_demo params:
 num_input = 2;
-num_hidden = 5;
+num_hidden = 2;
 num_output = 8;
 wts_size = [num_input, num_hidden, num_output];
 
@@ -31,6 +31,8 @@ if nargin<2
     %disp(['Using default DE params: 1) NP = ' num2str(np) ', F = ' num2str(f) ', CR = ' num2str(cr)])
 end
 
+EXP_ID = ['DEBUG DE POP' num2str(np)];
+
 % check that np > 4
 if np < 4
     error('Not enough population members NP; needs to be 4 at least!')
@@ -38,12 +40,27 @@ end
 
 % bool value for scaffolding option:
 useScaffolding = 0;
+if useScaffolding
+    EXP_ID = [EXP_ID ' S'];
+else
+    EXP_ID = [EXP_ID ' NS'];
+end
 
 % bool value for seeding from an elite:
-seedElite = 1;
+seedElite = 0;
+if seedElite
+    EXP_ID = [EXP_ID ' sE'];
+else
+    EXP_ID = [EXP_ID ' NsE'];
+end
 
 % bool value for using elite during evolution:
-useElite = 1;
+useElite = 0;
+if useElite
+    EXP_ID = [EXP_ID ' E'];
+else
+    EXP_ID = [EXP_ID ' NE'];
+end
 
 % number of elite members:
 if useElite
@@ -52,16 +69,21 @@ if useElite
     eliteFit = zeros(1,eliteNum);
 end
 
-% other misc params:
-EXP_ID = 'TARGETS DE ELITISM';
+max_gen = 200; % limits the generations
+max_fit = 10^3; % limits the fitness
+EXP_ID = [EXP_ID ' ' num2str(max_gen) 'GEN'];
+
+% naming scheme (add. stuff, not yet automatized):
+EXP_ID = [EXP_ID ' SS100 TXT'];
+
+
 if exist('EXP_ID','var')==0
     EXP_ID = 'TEST';
 end
 timeStamp = fix(clock);
 folderName = [EXP_ID ' ' mat2str(timeStamp)];
 
-max_gen = 1000; % limits the generations
-max_fit = 10^3; % limits the fitness
+
 
 % To use if there is necessity to terminate evolution early after
 % "breakCounter" generations where fitness improvement was less than
@@ -86,11 +108,17 @@ end
 tempx = zeros(np,d); % array for swapping
 
 % calculate their fitness the first time:
+initTime = tic;
 for l=1:np
     currPopMember = x(l,:);
     store_weights(currPopMember,wts_size);
     fitness(l) = read_fit;
 end
+stopInitTime = toc(initTime);
+mins = floor(stopInitTime/60);
+secs = round(mod(stopInitTime,60));
+disp(['Initialization of pop.array took: ' num2str(mins) ' minutes ' num2str(secs) ' seconds.'])
+disp(['Or ' num2str(stopInitTime/np) ' seconds per pop.member'])
 
 % if using elite, populate the elite matrix:
 if useElite
@@ -114,7 +142,7 @@ end
 
 
 % Main loop:
-while and(count < max_gen, min(fitness)<max_fit)
+while and(count <= max_gen, min(fitness)<max_fit)
     % for each member in population:
     startGenTime = tic;
     % check if previous fitness increase was smaller than threshold
@@ -201,22 +229,42 @@ while and(count < max_gen, min(fitness)<max_fit)
     end
     
     bestfit(count) = max(fitness);
+%     disp(['Best fitness this gen: ' num2str(max(fitness)) ', and it is recorded in bestfit(' num2str(count) ') = ' num2str(bestfit(count))])
     disp(['Gen: ' int2str(count) ' out of ' int2str(max_gen) ', best fit: ' num2str(bestfit(count))])
     count = count + 1;
     stopGenTime = toc(startGenTime);
     mins = floor(stopGenTime/60);
     secs = round(mod(stopGenTime,60));
     disp(['Generation time: ' num2str(mins) ' minutes ' num2str(secs) ' seconds.'])
+    timeLeft = stopGenTime*max_gen - count*stopGenTime;
+    hours = floor(timeLeft/3600);
+    mins = floor((timeLeft - hours*3600)/60);
+    secs = round(timeLeft - hours*3600 - mins*60);
+    disp(['Approx. time left: ' num2str(hours) ' hours ' num2str(mins) ' minutes ' num2str(secs) ' seconds until all ' num2str(max_gen) ' generations are done.'])
     
     % save best every 10 generations (useful to have a partial solution in case of early stop by user)
     if mod(count,10)==0
         [~,inx] = max(fitness);
         save_best(x(inx,:),wts_size,folderName);
+        % move source files to the folder:
+        if exist([folderName '\source'],'dir')==0
+            mkdir([folderName '\source']);
+        end
+        oldLocation = cd([folderName '\source']);
+        if exist('PDSTEP_demo.cpp','file')==0
+            cd(oldLocation);
+            copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\PDSTEP_demo.cpp',[folderName '\source'],'f');
+            copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\PDSTEP_demo.h',[folderName '\source'],'f');
+            copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\main.cpp',[folderName '\source'],'f');
+        else
+            cd(oldLocation);
+        end
+        
     end
 end
 % plot the best fitness (taken from every generation)
-if length(1:count-1)==length(bestfit(bestfit>0))
-    plot(1:count-1, bestfit(bestfit>0))
+if length(1:count)==length(bestfit(bestfit>0))
+    plot(1:count, bestfit(bestfit>0))
 else
     warning('!!!count vector and bestfit are not equal, plotting only bestfit!!!')
     plot(bestfit(bestfit>0))
@@ -228,15 +276,22 @@ saveas(gcf,[EXP_ID ' best fitness plot'],'png');
 movefile([EXP_ID ' best fitness plot.png'],folderName);
 
 % end status 
-disp(['DE finished on ' num2str(count) ' generation with fitness value of ' num2str(min(fitness))])
+disp(['DE finished on ' num2str(count) ' generation with fitness value of ' num2str(max(fitness))])
 stop = toc(startTime);
-mins = floor(stop/60);
-secs = round(mod(stop,60));
-disp(['Script time: ' num2str(mins) ' minutes ' num2str(secs) ' seconds.'])
+hours = floor(stop/3600);
+mins = floor((stop - hours*3600)/60);
+secs = round(stop - hours*3600 - mins*60);
+disp(['Script time: ' num2str(hours) ' hours ' num2str(mins) ' minutes ' num2str(secs) ' seconds.'])
 
 % run the best robot (DEMO version with graphics)
 disp('...Starting DEMO robot')
 [~,inx] = max(fitness);
+% DEBUG:
+disp('Fitness vector: ')
+disp(fitness)
+disp(['Max fitness is at ' num2str(inx) ' vector'])
+disp('Checking that the best is written to output dir')
+disp(x(inx,:))
 save_best(x(inx,:),wts_size,folderName); % saves the best pop'n member
 store_weights(x(inx,:),wts_size); % creates a weights file for running demo
 system('PDSTEP_demo.exe');
@@ -258,8 +313,8 @@ for j=1:wIJlength
     end
 end
     
-for j=1:wJKlength
-    if mod(j,wts_size(3))==0
+for j=(wIJlength+1):(wJKlength + wIJlength)
+    if mod((j - wIJlength),wts_size(3))==0
         fprintf(fid,'%2.4f\r\n',wts_vector(j));
     else
         fprintf(fid,'%2.4f ',wts_vector(j));
@@ -269,8 +324,7 @@ end
 fclose(fid);
 
 function f = read_fit(fileName,execName)
-% Function that stores wts in the local directory for C++ .exe to use
-% during the simulation:
+% Function runs the simulation and reads fitness from a FILE:
 if nargin<2
     execName = 'PDSTEP_train';
 end
@@ -301,10 +355,6 @@ system([execName '.exe']);
 if nargin<1
     fileName = 'fit.txt';
 end
-% necessary?
-% while (exist(fileName,'file')==0)
-%   pause(0.2);
-% end
 
 % Making sure there are no un-closed files:
 if ~isempty(fopen('all'))
@@ -314,8 +364,98 @@ end
 fid = fopen(fileName,'r');
 f = fscanf(fid,'%f',[1,1]);
 fclose(fid);
-%disp(['Current fitness is: ' num2str(f)]);
+% disp(['Current fitness is: ' num2str(f)]);
 delete(fileName);
+
+function message = socket_fit(execName, numRetries)
+% Function that runs simulation and receives fitness via socket:
+if nargin<2
+    numRetries = 30;
+end
+
+if nargin<1
+    execName = 'PDSTEP_train';
+end
+
+% check that all files are present:
+if exist('GLUT32.DLL','file')==0
+    warning('!!! MISSING GLUT32.DLL !!!')
+    input('Copy necessary file and press any key','s');
+end
+
+if exist([execName '.exe'],'file')==0
+    warning(['!!! MISSING ' execName '.exe !!!'])
+    input('Copy necessary file and press any key','s');
+end
+
+if exist([execName '.ilk'],'file')==0
+    warning(['!!! MISSING ' execName '.ilk !!!'])
+    input('Copy necessary file and press any key','s');
+end
+
+if exist([execName '.pdb'],'file')==0
+    warning(['!!! MISSING ' execName '.pdb !!!'])
+    input('Copy necessary file and press any key','s');
+end
+
+% using JAVA IO libraries 
+import java.net.ServerSocket
+import java.io.*
+% port is hardcoded in both C++ and here
+output_port = 27015;
+% initializing:
+server_socket  = [];
+input_socket  = [];
+retry = 0;
+
+while true
+    
+    retry = retry + 1;
+    if ((numRetries > 0) && (retry > numRetries))
+        error('Couldn''t obtain fitness!');
+        break;
+    end
+    
+    try
+        server_socket = ServerSocket(output_port);
+        server_socket.setSoTimeout(500);
+        % run the simulation app in the background, so that Matlab continues
+        % working (crucial for receiving data through the socket!)
+        dos([execName '.exe']);
+%         system([execName '.exe &']);
+        input_socket = server_socket.accept;
+        input_stream = input_socket.getInputStream;
+        d_input_stream = DataInputStream(input_stream);
+        message = zeros(1, 8, 'uint8');
+%         disp(['Message length(before conversion): ' int2str(length(message))])
+        for i = 1:8
+            message(i) = d_input_stream.read;
+        end
+%         disp(['Got this value from socket', message])
+        message = char(message);
+%         disp(['Same value in char format: ', message])
+        message = str2double(message);
+%         disp(['Message length(after conversion): ' int2str(length(message))])
+%         disp(['Same value in double format: ', num2str(message)])
+        server_socket.close;
+        input_socket.close;
+        
+        if length(message)==1
+            break;
+        end
+        
+    catch
+        if ~isempty(server_socket)
+            server_socket.close
+        end
+
+        if ~isempty(input_socket)
+            input_socket.close
+        end
+        % pause before retrying
+        pause(0.1);
+    end
+end
 
 function save_best(wts_vector,wts_size,folderName)
 % create a default folder, if no folder name is supplied
@@ -356,6 +496,9 @@ end
 copyfile('PDSTEP_demo.exe', folderName);
 copyfile('PDSTEP_demo.ilk', folderName);
 copyfile('PDSTEP_demo.pdb', folderName);
+copyfile('PDSTEP_train.exe', folderName);
+copyfile('PDSTEP_train.ilk', folderName);
+copyfile('PDSTEP_train.pdb', folderName);
 copyfile('GLUT32.DLL', folderName);
 
 oldFolder = cd(folderName);
@@ -372,8 +515,8 @@ for j=1:wIJlength
     end
 end
     
-for j=1:wJKlength
-    if mod(j,wts_size(3))==0
+for j=(wIJlength+1):(wJKlength + wIJlength)
+    if mod((j - wIJlength),wts_size(3))==0
         fprintf(fid,'%2.4f\r\n',wts_vector(j));
     else
         fprintf(fid,'%2.4f ',wts_vector(j));
@@ -405,7 +548,7 @@ function np = seed_pop(elite, popNum, wts_size)
 if nargin<3
 % PDSTEP_demo default params:
     num_input = 2;
-    num_hidden = 5;
+    num_hidden = 2;
     num_output = 8;
     wts_size = num_input*num_hidden + num_hidden*num_output;
 end
