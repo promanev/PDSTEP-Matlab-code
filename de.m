@@ -14,7 +14,7 @@ close all
 % PDSTEP_demo params:
 num_input = 2;
 num_hidden = 2;
-num_output = 8;
+num_output = 12;
 wts_size = [num_input, num_hidden, num_output];
 
 if nargin<1
@@ -22,16 +22,17 @@ if nargin<1
 end
 % name of file where fitness is recorded by C++ code:
 fileName = 'fit.txt';
-
+% DE configuration is either rand/1/bin (1) or best/2/bin(0):
+DEmethod = 0;
 % init default parameters:
 if nargin<2
-    np = 50;
+    np = d*5; % 140
     f = 0.5;
     cr = 0.1;
     %disp(['Using default DE params: 1) NP = ' num2str(np) ', F = ' num2str(f) ', CR = ' num2str(cr)])
 end
 
-EXP_ID = ['DEBUG DE POP' num2str(np)];
+EXP_ID = ['LEFT_TARG KNEES DE_METH2 NEWFIT POP' num2str(np)];
 
 % check that np > 4
 if np < 4
@@ -42,24 +43,24 @@ end
 useScaffolding = 0;
 if useScaffolding
     EXP_ID = [EXP_ID ' S'];
-else
-    EXP_ID = [EXP_ID ' NS'];
+% else
+%     EXP_ID = [EXP_ID ' NS'];
 end
 
 % bool value for seeding from an elite:
 seedElite = 0;
 if seedElite
     EXP_ID = [EXP_ID ' sE'];
-else
-    EXP_ID = [EXP_ID ' NsE'];
+% else
+%     EXP_ID = [EXP_ID ' NsE'];
 end
 
 % bool value for using elite during evolution:
 useElite = 0;
 if useElite
     EXP_ID = [EXP_ID ' E'];
-else
-    EXP_ID = [EXP_ID ' NE'];
+% else
+%     EXP_ID = [EXP_ID ' NE'];
 end
 
 % number of elite members:
@@ -69,12 +70,12 @@ if useElite
     eliteFit = zeros(1,eliteNum);
 end
 
-max_gen = 200; % limits the generations
+max_gen = 350; % limits the generations
 max_fit = 10^3; % limits the fitness
 EXP_ID = [EXP_ID ' ' num2str(max_gen) 'GEN'];
 
 % naming scheme (add. stuff, not yet automatized):
-EXP_ID = [EXP_ID ' SS100 TXT'];
+EXP_ID = [EXP_ID ' SS200 TXT'];
 
 
 if exist('EXP_ID','var')==0
@@ -102,7 +103,12 @@ if seedElite
     elite = read_seed;
     x = seed_pop(elite);
 else
+    if exist('seed.mat','file')~=0
+        load seed
+        rng(seed);
+    end
     x = rand(np,d); % each row is a member of population, each column - dimension
+    seed = rng;
 end
 
 tempx = zeros(np,d); % array for swapping
@@ -159,30 +165,50 @@ while and(count <= max_gen, min(fitness)<max_fit)
 
     % go through each population member:
     for i = 1:np
-        % MUTATE|RECOMBINE
-        % randomly pick three members:
-        members = randperm(np,3);
-        % randomly pick the dimension from which to start mutation:
-        j = ceil(rand*d);
-        for k=1:d
+        if DEmethod
+            % MUTATE|RECOMBINE
+            % randomly pick three members:
+            members = randperm(np,3);
+            % randomly pick the dimension from which to start mutation:
+            j = ceil(rand*d);
+            for k=1:d
+
+                if or(rand < cr, k==d)
+                    trial(j) = x(members(3),j) + f*(x(members(1),j) - x(members(2),j));
+                else
+                    trial(j) = x(i,j);
+                end        
+                j = mod((j),d)+1; % loops j values around starting from any point in vector of all values
+            end
+        else
+            % MUTATE|RECOMBINE
             
-            if or(rand < cr, k==d)
-                trial(j) = x(members(3),j) + f*(x(members(1),j) - x(members(2),j));
-            else
-                trial(j) = x(i,j);
-            end        
-            j = mod((j),d)+1; % loops j values around starting from any point in vector of all values
+            % Find the best vector in the current population:
+            [~,maxInx] = max(fitness);
+            currBestX = x(maxInx,:);
+            % randomly pick FOUR members:
+            members = randperm(np,4);
+            % randomly pick the dimension from which to start mutation:
+            j = ceil(rand*d);
+            for k=1:d
+
+                if or(rand < cr, k==d)
+                    trial(j) = currBestX(j) + f*(x(members(1),j) + x(members(2),j) - x(members(3),j) - x(members(4),j));
+                else
+                    trial(j) = x(i,j);
+                end        
+                j = mod((j),d)+1; % loops j values around starting from any point in vector of all values
+            end
         end
-        
         % EVALUATE|SELECT:        
         store_weights(trial,wts_size);
         
         % choose appropriate training robot file
         if useScaffolding
-            if (count<max_gen*0.7)
-                execName = 'PDSTEP_train_nu'; % no upright punishment
+            if (count<max_gen*0.75)
+                execName = 'PDSTEP_train'; % no upright punishment
             else
-                execName = 'PDSTEP_train';
+                execName = 'PDSTEP_train_up';
             end
         else
             execName = 'PDSTEP_train';
@@ -229,42 +255,63 @@ while and(count <= max_gen, min(fitness)<max_fit)
     end
     
     bestfit(count) = max(fitness);
-%     disp(['Best fitness this gen: ' num2str(max(fitness)) ', and it is recorded in bestfit(' num2str(count) ') = ' num2str(bestfit(count))])
     disp(['Gen: ' int2str(count) ' out of ' int2str(max_gen) ', best fit: ' num2str(bestfit(count))])
     count = count + 1;
+    
     stopGenTime = toc(startGenTime);
     mins = floor(stopGenTime/60);
-    secs = round(mod(stopGenTime,60));
+    secs = round(stopGenTime - mins*60);
+    if secs < 0
+        secs = 0;
+    end
     disp(['Generation time: ' num2str(mins) ' minutes ' num2str(secs) ' seconds.'])
+    
     timeLeft = stopGenTime*max_gen - count*stopGenTime;
     hours = floor(timeLeft/3600);
+    if hours < 0
+        hours = 0;
+    end
     mins = floor((timeLeft - hours*3600)/60);
+    if mins < 0
+        mins = 0;
+    end
     secs = round(timeLeft - hours*3600 - mins*60);
+    if secs < 0
+        secs = 0;
+    end
     disp(['Approx. time left: ' num2str(hours) ' hours ' num2str(mins) ' minutes ' num2str(secs) ' seconds until all ' num2str(max_gen) ' generations are done.'])
     
     % save best every 10 generations (useful to have a partial solution in case of early stop by user)
     if mod(count,10)==0
         [~,inx] = max(fitness);
         save_best(x(inx,:),wts_size,folderName);
-        % move source files to the folder:
-        if exist([folderName '\source'],'dir')==0
-            mkdir([folderName '\source']);
+        save([folderName '\' EXP_ID]);% Saves all of the variable from the run in the EXP_ID.mat
+        % Do this only once
+        if count == 10
+            % Saving seed used for this run:
+            save('seed','seed');
+            % move source files to the folder:
+            if exist([folderName '\source'],'dir')==0
+                disp(['Folder ' folderName '\source does not exist. Creating this folder...'])
+                mkdir([folderName '\source']);
+            end
+            oldLocation = cd([folderName '\source']);
+            if exist('PDSTEP_demo.cpp','file')==0
+                cd(oldLocation);
+                disp('Moving source files...')
+                copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\PDSTEP_demo.cpp',[folderName '\source'],'f');
+                copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\PDSTEP_demo.h',[folderName '\source'],'f');
+                copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\main.cpp',[folderName '\source'],'f');
+            else
+                cd(oldLocation);
+            end 
         end
-        oldLocation = cd([folderName '\source']);
-        if exist('PDSTEP_demo.cpp','file')==0
-            cd(oldLocation);
-            copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\PDSTEP_demo.cpp',[folderName '\source'],'f');
-            copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\PDSTEP_demo.h',[folderName '\source'],'f');
-            copyfile('C:\Users\Roman\Documents\Visual Studio 2015\Projects\bullet-2.82-r2704\Demos\PDSTEP_demo\main.cpp',[folderName '\source'],'f');
-        else
-            cd(oldLocation);
-        end
-        
     end
 end
+
 % plot the best fitness (taken from every generation)
-if length(1:count)==length(bestfit(bestfit>0))
-    plot(1:count, bestfit(bestfit>0))
+if length(1:count-1)==length(bestfit(bestfit>0))
+    plot(1:count-1, bestfit(bestfit>0))
 else
     warning('!!!count vector and bestfit are not equal, plotting only bestfit!!!')
     plot(bestfit(bestfit>0))
@@ -276,24 +323,34 @@ saveas(gcf,[EXP_ID ' best fitness plot'],'png');
 movefile([EXP_ID ' best fitness plot.png'],folderName);
 
 % end status 
-disp(['DE finished on ' num2str(count) ' generation with fitness value of ' num2str(max(fitness))])
+disp(['DE finished on ' num2str(count-1) ' generation with fitness value of ' num2str(max(fitness))])
 stop = toc(startTime);
 hours = floor(stop/3600);
+if hours < 0
+    hours = 0;
+end
 mins = floor((stop - hours*3600)/60);
+if mins < 0
+    mins = 0;
+end
 secs = round(stop - hours*3600 - mins*60);
+if secs < 0
+    secs = 0;
+end
 disp(['Script time: ' num2str(hours) ' hours ' num2str(mins) ' minutes ' num2str(secs) ' seconds.'])
 
 % run the best robot (DEMO version with graphics)
 disp('...Starting DEMO robot')
 [~,inx] = max(fitness);
 % DEBUG:
-disp('Fitness vector: ')
-disp(fitness)
-disp(['Max fitness is at ' num2str(inx) ' vector'])
-disp('Checking that the best is written to output dir')
+%disp('Fitness vector: ')
+%disp(fitness)
+%disp(['Max fitness is at ' num2str(inx) ' vector'])
+%disp('Checking that the best is written to output dir')
 disp(x(inx,:))
 save_best(x(inx,:),wts_size,folderName); % saves the best pop'n member
 store_weights(x(inx,:),wts_size); % creates a weights file for running demo
+cd(folderName);
 system('PDSTEP_demo.exe');
 
 %% Misc functions:
@@ -493,13 +550,19 @@ if exist([demoName '.pdb'],'file')==0
 end
 
 % copy demo robot files into the new folder:
-copyfile('PDSTEP_demo.exe', folderName);
-copyfile('PDSTEP_demo.ilk', folderName);
-copyfile('PDSTEP_demo.pdb', folderName);
-copyfile('PDSTEP_train.exe', folderName);
-copyfile('PDSTEP_train.ilk', folderName);
-copyfile('PDSTEP_train.pdb', folderName);
-copyfile('GLUT32.DLL', folderName);
+oldFolder = cd(folderName);
+if ~exist('PDSTEP*','file')
+    cd(oldFolder);
+    copyfile('PDSTEP_demo.exe', folderName);
+    copyfile('PDSTEP_demo.ilk', folderName);
+    copyfile('PDSTEP_demo.pdb', folderName);
+    copyfile('PDSTEP_train.exe', folderName);
+    copyfile('PDSTEP_train.ilk', folderName);
+    copyfile('PDSTEP_train.pdb', folderName);
+    copyfile('GLUT32.DLL', folderName);
+else
+    cd(oldFolder);
+end
 
 oldFolder = cd(folderName);
 
