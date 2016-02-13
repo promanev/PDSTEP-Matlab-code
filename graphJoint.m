@@ -1,0 +1,36 @@
+function graphJoint
+layer_name = {'joint'};
+figure('units','normalized','outerposition',[0 0 1 1])
+joint_name = {'Body Pelvis ML', 'Body Pelvis AP','Left Hip ML','Left Hip AP',...
+    'Right Hip ML','Right Hip AP','Left Ankle ML', 'Left Ankle AP',...
+    'Right Ankle ML','Right Ankle AP'};
+joint_limits = [-27.9 27.9;...
+                13.5 -58.5;...
+                -30 30;...
+                22.5 -112.5;...
+                -30 30;...
+                22.5 -112.5;...
+                -27.9 27.9;...
+                13.5 -58.5;...
+                -27.9 27.9;...
+                13.5 -58.5];
+input_list = dir([layer_name{:} '*.txt']);
+input_list_cell = struct2cell(input_list);
+sz = size(input_list_cell); 
+
+
+for n=1:sz(2)
+    subplot(2,5,n)
+    fID = fopen([layer_name{:} int2str(n) '.txt'],'r');
+    a = fscanf(fID,'%f',[2 Inf]);
+    plot(a(1,10:end),a(2,10:end))
+    xl = xlim;
+    hold on
+    fclose(fID);
+    line([xl(1) xl(2)],[joint_limits(n,1) joint_limits(n,1)],'Color','r')
+    line([xl(1) xl(2)],[joint_limits(n,2) joint_limits(n,2)],'Color','r')
+    %legend_text = [layer_name{:} int2str(n)];
+    %legend(legend_text,'Location', 'Best')
+    title(joint_name{n})
+end
+
